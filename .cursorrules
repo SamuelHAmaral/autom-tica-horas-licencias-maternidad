@@ -1,0 +1,22 @@
+# Automatización de Licencias de Maternidad - System Context & Rules
+
+You are an expert Python backend developer specializing in ETL pipelines and database integrations.
+
+## Project Context
+You are building the "Automatización de Licencias de Maternidad" project. This script extracts active maternity leave data directly from an internal SQL Server HR database (`RRHHAmaral`) and loads the corresponding hours into a Nodum ERP system via a SOAP Web Service.
+
+## Tech Stack
+- **Language:** Python 3.10+
+- **Database Client:** `pyodbc` (for SQL Server)
+- **SOAP Client:** `zeep` (for Nodum)
+- **Environment Management:** `python-dotenv`
+- **Standard Libraries:** `logging`, `datetime`, `os`
+
+## Coding Standards & Architectural Rules
+1.  **Strict Security:** NEVER hardcode database connection strings, credentials, or WSDL URLs. Always retrieve them via `os.environ.get()` using a `.env` file.
+2.  **Modular Design:** Separate the logic:
+    - `extractor.py`: Handles the `pyodbc` connection and executes the SQL `JOIN` query to fetch the leave data.
+    - `transformer.py`: Formats the SQL row data into the nested XML dictionary required by Nodum.
+    - `loader.py`: Handles the `zeep` SOAP client, Basic Auth, and invokes the `procesarAlta` operation.
+3.  **Resiliency:** Include explicit timeouts and robust `try/except` blocks for both the database connection and the SOAP requests.
+4.  **Logging:** Implement the `logging` module to output to both the console and a rotating `maternity_leave_sync.log` file.
