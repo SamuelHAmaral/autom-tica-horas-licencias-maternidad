@@ -46,8 +46,13 @@ class Settings:
     nodum_read_centro_costo_key: str
     nodum_read_filter_codigo_actividad: str
     nodum_read_filter_centro_costo: str
+    # If true, only sum read lines whose centro/actividad text matches resolved G2 proyecto (or fallback substring).
+    nodum_read_match_resolved_proyecto: bool
+    # Case-insensitive: line matches if this appears in centro or actividad text (e.g. maternidad). Empty = no fallback.
+    nodum_read_line_substring_fallback: str
     # Payload shaping for TpryParteDiaGS (align keys with WSDL if zeep rejects a field).
     nodum_fecha_documento_strftime: str
+    nodum_codigo_empresa: str
     nodum_g1_observaciones: str
     nodum_g2_codigo_actividad: str
     nodum_g2_horas: float
@@ -249,7 +254,16 @@ def load_settings() -> Settings:
             "NODUM_READ_FILTER_CODIGO_ACTIVIDAD", ""
         ),
         nodum_read_filter_centro_costo=opt("NODUM_READ_FILTER_CENTRO_COSTO", ""),
+        nodum_read_match_resolved_proyecto=opt_bool(
+            "NODUM_READ_MATCH_RESOLVED_PROYECTO", True
+        ),
+        nodum_read_line_substring_fallback=(
+            "maternidad"
+            if "NODUM_READ_LINE_SUBSTRING_FALLBACK" not in os.environ
+            else os.environ.get("NODUM_READ_LINE_SUBSTRING_FALLBACK", "").strip()
+        ),
         nodum_fecha_documento_strftime=fmt,
+        nodum_codigo_empresa=opt("NODUM_CODIGO_EMPRESA", "01"),
         nodum_g1_observaciones=opt("NODUM_G1_OBSERVACIONES", "licencia maternidad automatic"),
         nodum_g2_codigo_actividad=opt("NODUM_G2_CODIGO_ACTIVIDAD", "001"),
         nodum_g2_horas=opt_float("NODUM_G2_HORAS", 8.0),

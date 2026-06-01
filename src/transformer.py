@@ -199,7 +199,7 @@ def build_daily_payloads(
             {
                 "General": {
                     "G1": {
-                        "CodigoEmpresa": "01",
+                        "CodigoEmpresa": settings.nodum_codigo_empresa,
                         "FechaDocumento": dia.strftime(fmt),
                         "CodigoIdentificacion": str(recurso_id).strip(),
                         "observaciones": settings.nodum_g1_observaciones,

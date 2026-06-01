@@ -5,6 +5,7 @@ Entry point: extract active maternity leaves, transform for Nodum, call procesar
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from collections.abc import Mapping
 from datetime import date
@@ -22,6 +23,7 @@ from src.calendar_gate import should_run_sync
 from src.extractor import fetch_active_leaves, fetch_holiday_dates_in_range
 from src.loader import fetch_existing_hours_by_date, nodum_read_is_configured, procesar_alta
 from src.logging_config import LOG_FILENAME, setup_logging
+from src.production_checks import log_production_checks, run_production_checks
 from src.settings import Settings, load_settings
 from src.transformer import (
     build_daily_payloads,
@@ -29,6 +31,7 @@ from src.transformer import (
     leave_working_dates_backfill_to_run_date,
     leave_working_dates_in_current_week,
     parse_leave_fecha_inicio,
+    resolve_g2_centrode_costo,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,6 +115,22 @@ def main() -> int:
         logger.error("Configuration error: %s", e)
         return 1
 
+    strict_prod = os.environ.get("SYNC_PRODUCTION", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if strict_prod:
+        logger.info("SYNC_PRODUCTION=1: strict pre-flight checks enabled.")
+    prod = run_production_checks(settings, strict=strict_prod)
+    log_production_checks(prod)
+    if not prod.ok:
+        logger.error(
+            "Aborting: fix blocking production checks or unset SYNC_PRODUCTION for a dry test."
+        )
+        return 1
+
     if settings.sync_force_run:
         logger.warning(
             "SYNC_FORCE_RUN is set; weekend and ct_RHFeriados checks are disabled."
@@ -140,6 +159,7 @@ def main() -> int:
         "backfill": "submit partes for every working leave day from fecha_inicio through min(fecha_fin, run date)",
     }[settings.nodum_parte_scope]
     logger.info("NODUM_PARTE_SCOPE=%s: %s", settings.nodum_parte_scope, _scope_desc)
+    logger.info("Nodum write (procesarAlta) WSDL: %s", settings.nodum_wsdl)
     if nodum_read_is_configured(settings):
         logger.info(
             "Nodum read enabled: operation=%s wsdl=%s",
@@ -310,6 +330,7 @@ def main() -> int:
 
         dry_ctx = _dry_run_context_from_row(row) if settings.nodum_dry_run else None
         target_daily_hours = float(settings.nodum_g2_horas)
+        g2_cc = resolve_g2_centrode_costo(row, settings)
         nodum_loaded_by_date: dict[date, float] = {}
         if nodum_read_is_configured(settings):
             try:
@@ -318,6 +339,7 @@ def main() -> int:
                     recurso_id=recurso,
                     start_date=min(valid_dates),
                     end_date=max(valid_dates),
+                    g2_centrode_costo=g2_cc,
                 )
             except Exception:
                 failures += 1

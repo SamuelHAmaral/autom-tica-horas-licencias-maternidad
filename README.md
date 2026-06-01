@@ -25,9 +25,27 @@ pip install -r requirements.txt
 
 3. **Backfill y duplicados:** con `backfill`, por defecto se usa **`maternity_leave_sync_state.json`** (junto a `main.py`) como *marca de agua* por `recurso_id` + `fec_inicio`: solo se envían fechas **posteriores** al último día ya aceptado o marcado como duplicado aceptable en Nodum. Así se puede dejar `backfill` activo sin reenviar toda la historia cada día. **`NODUM_BACKFILL_STATE_DISABLE=1`** desactiva el archivo y vuelve al comportamiento de reintentar todo el rango (útil si confías solo en mensajes de duplicado). **`NODUM_BACKFILL_STATE_FILE`** solo admite un nombre de archivo (sin rutas).
 
-4. **Lectura previa desde Nodum (opcional):** si configurás `NODUM_READ_OPERATION`, el job consulta Nodum antes de cargar, suma horas ya existentes por `recurso + fecha` y envía solo la diferencia hasta `NODUM_G2_HORAS` (por defecto 8). Sin esa config, usa el estado local JSON como referencia.
+4. **Lectura previa desde Nodum (recomendado en producción):** con `NODUM_READ_OPERATION=simular`, el job consulta Amaral01 antes de cargar, cuenta solo líneas del **proyecto maternidad** resuelto (`NODUM_READ_MATCH_RESOLVED_PROYECTO=1`) y envía solo la diferencia hasta `NODUM_G2_HORAS` (8).
 
-4. Mapear `cod_dpto` de RRHH a proyectos Nodum con **`NODUM_MATERNITY_PROJECT_BY_DEPT`**; con **`MATERNITY_PRY_USE_CABIDRECURSO=1`** (por defecto) se prioriza el proyecto maternidad del ERP (`amaral01` / `ct_cabidrecursos`). Los scripts en `scripts/` ayudan a mantener mapeos.
+5. Mapear `cod_dpto` de RRHH a proyectos Nodum con **`NODUM_MATERNITY_PROJECT_BY_DEPT`**; con **`MATERNITY_PRY_USE_CABIDRECURSO=1`** (por defecto) se prioriza el proyecto maternidad del ERP (`amaral01` / `ct_cabidrecursos`). Los scripts en `scripts/` ayudan a mantener mapeos.
+
+## Producción
+
+Guía paso a paso: **[docs/PRODUCTION.md](docs/PRODUCTION.md)**.
+
+Resumen:
+
+| Variable | Producción |
+|----------|------------|
+| `SYNC_PRODUCTION` | `1` |
+| `NODUM_DRY_RUN` | `0` |
+| `NODUM_PARTE_SCOPE` | `today` (tarea diaria; `backfill` solo para puesta al día inicial) |
+| `NODUM_WSDL_URL` / `NODUM_READ_WSDL_URL` | Ruta `/soap/Amaral01/...` |
+| `SYNC_TEST_DATE` | no definir |
+
+Programador de tareas Windows: ejecutar **`run_daily_sync.bat`** con “Iniciar en” = carpeta del proyecto (donde está `.env`).
+
+Con `SYNC_PRODUCTION=1`, el job **no arranca** si `NODUM_DRY_RUN=1` o si `SYNC_TEST_DATE` está definido.
 
 ## Ejecución
 
@@ -47,7 +65,9 @@ Estas variables permiten adaptar la consulta al WSDL de lectura:
 - `NODUM_READ_PARAM_RECURSO`, `NODUM_READ_PARAM_FECHA_DESDE`, `NODUM_READ_PARAM_FECHA_HASTA`: nombres de parámetros de entrada del método SOAP.
 - `NODUM_READ_RECURSO_KEY`, `NODUM_READ_FECHA_KEY`, `NODUM_READ_HORAS_KEY`: claves esperadas en la respuesta para parsear recurso/fecha/horas.
 - `NODUM_READ_CODIGO_ACTIVIDAD_KEY`, `NODUM_READ_CENTRO_COSTO_KEY`: claves para filtros opcionales.
-- `NODUM_READ_FILTER_CODIGO_ACTIVIDAD`, `NODUM_READ_FILTER_CENTRO_COSTO`: si se definen, solo se computan líneas que coincidan.
+- `NODUM_READ_FILTER_CODIGO_ACTIVIDAD`, `NODUM_READ_FILTER_CENTRO_COSTO`: filtros fijos opcionales (vacío = usar match por proyecto resuelto).
+- `NODUM_READ_MATCH_RESOLVED_PROYECTO`, `NODUM_READ_LINE_SUBSTRING_FALLBACK`: evitan contar horas de otros proyectos como “maternidad completa”.
+- `NODUM_CODIGO_EMPRESA`: empresa en G1 (por defecto `01`).
 
 La corrida **no** se ejecuta en fin de semana ni si el día actual está en **`ct_RHFeriados`**, salvo **`SYNC_FORCE_RUN=1`**.
 
@@ -89,3 +109,6 @@ Opcional: **`AMARAL_CATALOG_DATABASE`** si la base ERP no es `amaral01`.
 - `src/calendar_gate.py` — fin de semana / feriados  
 - `src/backfill_state.py` — JSON de marca de agua para `backfill`  
 - `src/logging_config.py` — consola + log rotativo  
+- `src/production_checks.py` — validaciones pre-producción (`SYNC_PRODUCTION`)  
+- `run_daily_sync.bat` — entrada para Task Scheduler  
+- `docs/PRODUCTION.md` — checklist de despliegue  

@@ -122,12 +122,40 @@ def _walk_dicts(node: Any) -> list[Mapping[str, Any]]:
     return out
 
 
+def _read_line_matches_maternity_proyecto(
+    settings: Settings,
+    item: Mapping[str, Any],
+    *,
+    g2_centrode_costo: str,
+) -> bool:
+    """
+    When match mode is on, only count detail lines for the same proyecto we load (PRY…)
+    or lines whose centro/actividad text contains the fallback substring (e.g. maternidad).
+    Avoids treating 8h on other proyectos as 'maternity complete'.
+    """
+    if not settings.nodum_read_match_resolved_proyecto:
+        return True
+    needle = g2_centrode_costo.strip()
+    if not needle:
+        return True
+    cc_line = _dict_get_ci(item, settings.nodum_read_centro_costo_key)
+    act_line = _dict_get_ci(item, settings.nodum_read_codigo_actividad_key)
+    blob = f"{cc_line} {act_line}".strip()
+    if needle.upper() in blob.upper():
+        return True
+    fb = settings.nodum_read_line_substring_fallback.strip()
+    if fb and fb.lower() in blob.lower():
+        return True
+    return False
+
+
 def fetch_existing_hours_by_date(
     settings: Settings,
     *,
     recurso_id: object,
     start_date: date,
     end_date: date,
+    g2_centrode_costo: str = "",
 ) -> dict[date, float]:
     """
     Query Nodum read operation and aggregate already loaded hours per date for one recurso.
@@ -168,6 +196,14 @@ def fetch_existing_hours_by_date(
     filter_act = settings.nodum_read_filter_codigo_actividad.strip()
     filter_cc = settings.nodum_read_filter_centro_costo.strip()
 
+    if settings.nodum_read_match_resolved_proyecto and g2_centrode_costo.strip():
+        logger.info(
+            "Nodum read: counting hours only for lines matching proyecto %r "
+            "(substring fallback %r).",
+            g2_centrode_costo.strip(),
+            settings.nodum_read_line_substring_fallback or "",
+        )
+
     totals: dict[date, float] = {}
     for item in dicts:
         rec = _dict_get_ci(item, settings.nodum_read_recurso_key)
@@ -185,6 +221,10 @@ def fetch_existing_hours_by_date(
             cc = _dict_get_ci(item, settings.nodum_read_centro_costo_key)
             if str(cc).strip() != filter_cc:
                 continue
+        if not _read_line_matches_maternity_proyecto(
+            settings, item, g2_centrode_costo=g2_centrode_costo
+        ):
+            continue
         d = _to_iso_date(fec)
         if d is None or d < start_date or d > end_date:
             continue
