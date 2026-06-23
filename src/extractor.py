@@ -127,14 +127,21 @@ WHERE CAST({col_f} AS date) BETWEEN ? AND ?;
 
 def _build_connection_string(settings: Settings) -> str:
     driver = settings.sql_driver.strip("{}")
-    return (
+    conn_str = (
         f"DRIVER={{{driver}}};"
         f"SERVER={settings.sql_server};"
         f"DATABASE={settings.sql_database};"
         f"UID={settings.sql_uid};"
         f"PWD={settings.sql_pwd};"
-        "TrustServerCertificate=yes;"
     )
+    if settings.sql_encrypt:
+        conn_str += f"Encrypt={settings.sql_encrypt};"
+    conn_str += (
+        "TrustServerCertificate=yes;"
+        if settings.sql_trust_server_certificate
+        else "TrustServerCertificate=no;"
+    )
+    return conn_str
 
 
 def fetch_active_leaves(settings: Settings) -> list[dict[str, Any]]:

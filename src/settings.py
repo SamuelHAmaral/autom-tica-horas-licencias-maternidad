@@ -19,6 +19,9 @@ class Settings:
     sql_database: str
     sql_uid: str
     sql_pwd: str
+    # ODBC TLS negotiation knobs (empty Encrypt = driver default behavior).
+    sql_encrypt: str
+    sql_trust_server_certificate: bool
     sql_col_lic_fecha_inicio: str
     sql_col_lic_fecha_fin: str
     sql_col_trab_centro_costo: str
@@ -218,6 +221,10 @@ def load_settings() -> Settings:
         sql_database=req("SQL_SERVER_DATABASE"),
         sql_uid=req("SQL_SERVER_UID"),
         sql_pwd=req("SQL_SERVER_PWD"),
+        sql_encrypt=opt("SQL_ENCRYPT", ""),
+        sql_trust_server_certificate=opt_bool(
+            "SQL_TRUST_SERVER_CERTIFICATE", True
+        ),
         sql_col_lic_fecha_inicio=opt("SQL_COL_LIC_FECHA_INICIO", "fecha_inicio"),
         sql_col_lic_fecha_fin=opt("SQL_COL_LIC_FECHA_FIN", "fecha_fin"),
         sql_col_trab_centro_costo=opt("SQL_COL_TRAB_CENTRO_COSTO", "centro_costo"),

@@ -26,25 +26,30 @@ Confirm SQL points at production RRHH (`SQL_SERVER_*`) and Nodum credentials hav
 1. **Initial catch-up** (optional): `NODUM_PARTE_SCOPE=backfill`, run once, verify logs and Nodum UI.
 2. **Daily production**: set `NODUM_PARTE_SCOPE=today`, keep `maternity_leave_sync_state.json` on the server (gitignored; watermark for backfill if you switch scope again).
 
-## 3. Pre-flight test on the server
+## 3. Pre-flight test on the server (Linux)
 
-```powershell
-cd "C:\path\to\automática horas licencias maternidad 1"
-py -3 scripts\audit_maternity_sql.py
-py -3 main.py
+```bash
+cd /var/www/licencia-maternidad
+python3 scripts/audit_maternity_sql.py
+python3 main.py
 ```
 
 - Exit code **0** = success or nothing to do (weekend/holiday/already synced).
 - Exit code **3** = Nodum rejected a load; check `maternity_leave_sync.log`.
 - Audit script lists who is in active maternal leave and resolved `G2.CentrodeCosto`.
 
-## 4. Windows Task Scheduler
+## 4. Cron (Linux scheduler)
 
-1. Create task: **Daily**, weekday mornings (after HR data is current).
-2. Action: `run_daily_sync.bat` (or `py -3 main.py`).
-3. **Start in**: project folder (where `.env` lives).
-4. Run whether user is logged on or not; use a service account with network access to SQL + Nodum.
-5. On failure, alert if **Last Run Result** ≠ `0x0` (see exit codes in README).
+1. Ensure launcher is executable: `chmod +x /var/www/licencia-maternidad/run_daily_sync.sh`.
+2. Edit crontab for the run account: `crontab -e`.
+3. Add weekday schedule (example 06:15):
+
+```cron
+15 6 * * 1-5 /var/www/licencia-maternidad/run_daily_sync.sh >> /var/www/licencia-maternidad/cron.log 2>&1
+```
+
+4. Use a service account with network access to SQL + Nodum.
+5. Validate with `crontab -l` and monitor `cron.log` + `maternity_leave_sync.log`.
 
 ## 5. Monitoring
 
@@ -57,7 +62,7 @@ py -3 main.py
 - Restrict file ACL on `.env` to the run account only.
 - Do not copy test `maternity_leave_sync_state.json` from another environment into production unless intentional.
 
-## Exit codes (Task Scheduler)
+## Exit codes (cron / scheduler)
 
 | Code | Meaning |
 |------|---------|

@@ -43,14 +43,22 @@ Resumen:
 | `NODUM_WSDL_URL` / `NODUM_READ_WSDL_URL` | Ruta `/soap/Amaral01/...` |
 | `SYNC_TEST_DATE` | no definir |
 
-Programador de tareas Windows: ejecutar **`run_daily_sync.bat`** con “Iniciar en” = carpeta del proyecto (donde está `.env`).
+Programación Linux (cron):
+
+1. Dar permisos al lanzador: `chmod +x run_daily_sync.sh`
+2. Editar cron: `crontab -e`
+3. Programar (ejemplo lunes a viernes 06:15):
+
+```cron
+15 6 * * 1-5 /var/www/licencia-maternidad/run_daily_sync.sh >> /var/www/licencia-maternidad/cron.log 2>&1
+```
 
 Con `SYNC_PRODUCTION=1`, el job **no arranca** si `NODUM_DRY_RUN=1` o si `SYNC_TEST_DATE` está definido.
 
 ## Ejecución
 
 ```bash
-py -3 main.py
+python3 main.py
 ```
 
 - **`NODUM_DRY_RUN=1`**: arma el payload y registra en log; **no** llama a Nodum y **no** actualiza el archivo de estado de backfill.
@@ -75,7 +83,7 @@ La corrida **no** se ejecuta en fin de semana ni si el día actual está en **`c
 
 **`SYNC_TEST_DATE=YYYY-MM-DD`** en `.env`: esa fecha actúa como “hoy” para el calendario, la semana ISO, el filtro SQL de licencias activas y el tope del **backfill**. Aparece un **WARNING** en el log; **quitar en producción**. Si la fecha cae en sábado/domingo o feriado y querés forzar la corrida, usar **`SYNC_FORCE_RUN=1`**.
 
-### Códigos de salida (programador de tareas)
+### Códigos de salida (scheduler / cron)
 
 | Código | Significado |
 |--------|-------------|
@@ -110,5 +118,6 @@ Opcional: **`AMARAL_CATALOG_DATABASE`** si la base ERP no es `amaral01`.
 - `src/backfill_state.py` — JSON de marca de agua para `backfill`  
 - `src/logging_config.py` — consola + log rotativo  
 - `src/production_checks.py` — validaciones pre-producción (`SYNC_PRODUCTION`)  
-- `run_daily_sync.bat` — entrada para Task Scheduler  
+- `run_daily_sync.sh` — entrada para `cron` en Linux  
+- `run_daily_sync.bat` — alternativa para Task Scheduler en Windows  
 - `docs/PRODUCTION.md` — checklist de despliegue  

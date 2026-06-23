@@ -5,6 +5,7 @@
 maternity_leave_sync.log
 maternity_leave_sync.log.*
 maternity_leave_sync_state.json
+cron_sync.log
 
 # Python
 __pycache__/
