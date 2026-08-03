@@ -19,11 +19,11 @@ pip install -r requirements.txt
 
    | Valor | Comportamiento |
    |--------|----------------|
-   | **`today`** | Solo el día de corrida (si está en licencia, es lun–vie y no es feriado en `ct_RHFeriados`). Recomendado con tarea diaria. |
+   | **`today`** | Todos los días hábiles de la licencia desde **`fec_inicio`** hasta el día de corrida. Omite los que ya están completos en Nodum (lectura) y/o en el state local. **Recomendado** con tarea diaria: si el cron falla varios días, la siguiente corrida recupera los faltantes. |
    | **`week`** | Todos los días hábiles de la **semana ISO actual** que caen dentro de `[fec_inicio, fec_final]`. |
-   | **`backfill`** | Todos los días hábiles desde **`fec_inicio`** hasta **`min(fec_final, día de corrida)`**. Sirve cuando la licencia se carga tarde en RRHH: el inicio real debe estar bien cargado en SQL; el job no usa la fecha de alta del registro. |
+   | **`backfill`** | Mismo rango que **`today`** (alias de puesta al día). |
 
-3. **Backfill y duplicados:** con `backfill`, por defecto se usa **`maternity_leave_sync_state.json`** (junto a `main.py`) como *marca de agua* por `recurso_id` + `fec_inicio`: solo se envían fechas **posteriores** al último día ya aceptado o marcado como duplicado aceptable en Nodum. Así se puede dejar `backfill` activo sin reenviar toda la historia cada día. **`NODUM_BACKFILL_STATE_DISABLE=1`** desactiva el archivo y vuelve al comportamiento de reintentar todo el rango (útil si confías solo en mensajes de duplicado). **`NODUM_BACKFILL_STATE_FILE`** solo admite un nombre de archivo (sin rutas).
+3. **State y duplicados:** por defecto se usa **`maternity_leave_sync_state.json`** (junto a `main.py`) para recordar horas ya enviadas. Con **`NODUM_READ_OPERATION`** activo (recomendado), cada corrida consulta Nodum sobre toda la ventana de licencia y solo envía la diferencia hasta `NODUM_G2_HORAS` (8), así no quedan huecos tras una caída. La marca de agua `last_ok_fecha` solo acota fechas cuando la lectura Nodum está apagada. **`NODUM_BACKFILL_STATE_DISABLE=1`** desactiva el archivo. **`NODUM_BACKFILL_STATE_FILE`** solo admite un nombre de archivo (sin rutas).
 
 4. **Lectura previa desde Nodum (recomendado en producción):** con `NODUM_READ_OPERATION=simular`, el job consulta Amaral01 antes de cargar, cuenta solo líneas del **proyecto maternidad** resuelto (`NODUM_READ_MATCH_RESOLVED_PROYECTO=1`) y envía solo la diferencia hasta `NODUM_G2_HORAS` (8).
 
@@ -39,7 +39,7 @@ Resumen:
 |----------|------------|
 | `SYNC_PRODUCTION` | `1` |
 | `NODUM_DRY_RUN` | `0` |
-| `NODUM_PARTE_SCOPE` | `today` (tarea diaria; `backfill` solo para puesta al día inicial) |
+| `NODUM_PARTE_SCOPE` | `today` (tarea diaria; auto catch-up de días faltantes hasta la fecha de corrida) |
 | `NODUM_WSDL_URL` / `NODUM_READ_WSDL_URL` | Ruta `/soap/Amaral01/...` |
 | `SYNC_TEST_DATE` | no definir |
 

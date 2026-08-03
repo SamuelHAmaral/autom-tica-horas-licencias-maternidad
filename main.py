@@ -154,9 +154,15 @@ def main() -> int:
         )
 
     _scope_desc = {
-        "today": "submit at most one parte per recurso for the run date only",
+        "today": (
+            "submit missing working leave days from fecha_inicio through the run date "
+            "(auto catch-up after outages; skips days already complete in Nodum/local state)"
+        ),
         "week": "submit partes for every working leave day in the current ISO week (intersect leave)",
-        "backfill": "submit partes for every working leave day from fecha_inicio through min(fecha_fin, run date)",
+        "backfill": (
+            "submit missing working leave days from fecha_inicio through min(fecha_fin, run date) "
+            "(same catch-up range as today)"
+        ),
     }[settings.nodum_parte_scope]
     logger.info("NODUM_PARTE_SCOPE=%s: %s", settings.nodum_parte_scope, _scope_desc)
     logger.info("Nodum write (procesarAlta) WSDL: %s", settings.nodum_wsdl)
@@ -232,16 +238,23 @@ def main() -> int:
         state_path = BASE_DIR / settings.nodum_backfill_state_file
         state_data = backfill_state.load(state_path)
         logger.info("Sync state file: %s", state_path)
-    if settings.nodum_parte_scope == "backfill":
+    if settings.nodum_parte_scope in ("today", "backfill"):
         logger.info(
-            "Backfill mode: ct_RHFeriados loaded for %s..%s (%d holiday date(s) in range).",
+            "Catch-up range: ct_RHFeriados loaded for %s..%s (%d holiday date(s) in range).",
             cal_start.isoformat(),
             cal_end.isoformat(),
             len(holiday_dates),
         )
         if settings.nodum_backfill_state_disabled:
             logger.info(
-                "Backfill watermark off (NODUM_BACKFILL_STATE_DISABLE); full range every run."
+                "Local sync state off (NODUM_BACKFILL_STATE_DISABLE); "
+                "completeness relies on Nodum read and/or duplicate handling."
+            )
+        elif nodum_read_is_configured(settings):
+            logger.info(
+                "Nodum read on: full leave window scanned each run; "
+                "only days below %.2f h are submitted.",
+                settings.nodum_g2_horas,
             )
 
     processed_recursos: set[object] = set()
@@ -263,7 +276,9 @@ def main() -> int:
             continue
         processed_recursos.add(recurso)
 
-        if settings.nodum_parte_scope == "backfill":
+        if settings.nodum_parte_scope in ("today", "backfill"):
+            # Daily production catch-up: every working leave day through run_date.
+            # Days already at NODUM_G2_HORAS (Nodum read and/or local state) are skipped below.
             valid_dates = leave_working_dates_backfill_to_run_date(
                 row, holiday_dates, run_date=run_date
             )
@@ -271,12 +286,17 @@ def main() -> int:
             valid_dates = leave_working_dates_in_current_week(
                 row, holiday_dates, today=run_date
             )
-            if settings.nodum_parte_scope == "today":
-                valid_dates = [d for d in valid_dates if d == run_date]
         fi: date | None = None
-        if settings.nodum_parte_scope == "backfill":
+        if settings.nodum_parte_scope in ("today", "backfill"):
             fi = parse_leave_fecha_inicio(row)
-            if state_path is not None and state_data is not None:
+            # Watermark only when Nodum read is off: with read enabled we must scan the full
+            # leave window so gaps after an outage are still detected (watermark alone can
+            # skip past a failed day once a later day succeeds).
+            if (
+                state_path is not None
+                and state_data is not None
+                and not nodum_read_is_configured(settings)
+            ):
                 last_ok = backfill_state.get_last_ok_fecha(
                     state_data, recurso, fi
                 )
@@ -286,8 +306,8 @@ def main() -> int:
                 )
                 if last_ok is not None and len(valid_dates) < n_before:
                     logger.info(
-                        "Backfill skip already-synced recurso_id=%s last_ok=%s "
-                        "(%d pending weekday(s), %d skipped) SQL row %d/%d.%s",
+                        "Catch-up skip already-synced recurso_id=%s last_ok=%s "
+                        "(%d pending weekday(s), %d skipped; Nodum read off) SQL row %d/%d.%s",
                         recurso,
                         last_ok.isoformat(),
                         len(valid_dates),
@@ -298,21 +318,12 @@ def main() -> int:
                     )
 
         if not valid_dates:
-            if settings.nodum_parte_scope == "today":
-                logger.info(
-                    "Skipping recurso_id=%s: no parte for run date %s (not a working leave day, "
-                    "holiday, or outside leave range; SQL row %d/%d).%s",
-                    recurso,
-                    run_date.isoformat(),
-                    i,
-                    len(rows),
-                    nom,
-                )
-            elif settings.nodum_parte_scope == "backfill":
+            if settings.nodum_parte_scope in ("today", "backfill"):
                 logger.info(
                     "Skipping recurso_id=%s: no working leave days from inicio through run date "
-                    "(SQL row %d/%d).%s",
+                    "%s (SQL row %d/%d).%s",
                     recurso,
+                    run_date.isoformat(),
                     i,
                     len(rows),
                     nom,

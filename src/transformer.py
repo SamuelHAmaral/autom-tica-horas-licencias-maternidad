@@ -1,6 +1,7 @@
 """Map SQL rows to Nodum procesarAlta payloads (TpryParteDiaGS): one SOAP call per date in dias_habiles.
 
-Which dates are passed in is controlled by NODUM_PARTE_SCOPE in main (today, week, or backfill).
+Which dates are passed in is controlled by NODUM_PARTE_SCOPE in main
+(today/backfill = catch-up through run date; week = current ISO week).
 """
 
 from __future__ import annotations
@@ -44,10 +45,10 @@ def holiday_range_for_sync(
     """
     Inclusive calendar bounds for loading ct_RHFeriados.
 
-    For ``backfill``, span from the earliest ``fecha_inicio`` among rows through ``run_date``
-    so every candidate leave day can be checked against holidays.
+    For ``today`` and ``backfill``, span from the earliest ``fecha_inicio`` among rows
+    through ``run_date`` so catch-up candidate leave days can be checked against holidays.
     """
-    if parte_scope == "backfill":
+    if parte_scope in ("today", "backfill"):
         if not rows:
             return run_date, run_date
         earliest = min(_to_date(r["fecha_inicio"]) for r in rows)

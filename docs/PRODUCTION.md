@@ -10,7 +10,7 @@ Copy `.env.example` to `.env` on the server. **Never commit `.env`.**
 |---------|----------------|
 | `SYNC_PRODUCTION` | `1` (blocks dry-run / test date) |
 | `NODUM_DRY_RUN` | `0` |
-| `NODUM_PARTE_SCOPE` | `today` (daily task; use `backfill` only for one-time catch-up) |
+| `NODUM_PARTE_SCOPE` | `today` (daily job; auto catch-up of any missing leave days through run date) |
 | `NODUM_WSDL_URL` | `http://<host>:8080/soap/Amaral01/services/forms/v1.3/TpryParteDiaGS?wsdl` |
 | `NODUM_READ_WSDL_URL` | `http://<host>:8080/soap/Amaral01/services/sim/v1.3/RPryConsHorsxTit?wsdl` |
 | `NODUM_READ_OPERATION` | `simular` |
@@ -21,10 +21,11 @@ Copy `.env.example` to `.env` on the server. **Never commit `.env`.**
 
 Confirm SQL points at production RRHH (`SQL_SERVER_*`) and Nodum credentials have access to **Amaral01** forms + sim services.
 
-## 2. One-time catch-up vs daily
+## 2. Daily catch-up vs one-time backfill
 
-1. **Initial catch-up** (optional): `NODUM_PARTE_SCOPE=backfill`, run once, verify logs and Nodum UI.
-2. **Daily production**: set `NODUM_PARTE_SCOPE=today`, keep `maternity_leave_sync_state.json` on the server (gitignored; watermark for backfill if you switch scope again).
+1. **Production daily**: keep `NODUM_PARTE_SCOPE=today`. Each run scans working leave days from `fec_inicio` through today, asks Nodum what is already loaded, and submits only the missing hours. After a multi-day outage the next successful run fills the gaps.
+2. **`backfill`**: same date range as `today` (kept as an alias). Prefer `today` for the scheduled job.
+3. Keep `maternity_leave_sync_state.json` on the server (gitignored) and keep `NODUM_READ_OPERATION=simular` enabled so completeness is checked against Nodum, not only local state.
 
 ## 3. Pre-flight test on the server (Linux)
 

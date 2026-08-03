@@ -48,8 +48,8 @@ def run_production_checks(settings: Settings, *, strict: bool) -> ProductionChec
 
     if settings.nodum_parte_scope == "backfill" and strict:
         warnings.append(
-            "NODUM_PARTE_SCOPE=backfill in production: prefer 'today' for daily Task Scheduler "
-            "(backfill only for initial catch-up, then switch to today)."
+            "NODUM_PARTE_SCOPE=backfill is an alias of daily catch-up; "
+            "prefer 'today' (same fecha_inicio..run_date behavior) for the scheduled job."
         )
 
     if not nodum_read_is_configured(settings):
