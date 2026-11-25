@@ -1,4 +1,9 @@
-"""Extract active maternity leaves from SQL Server."""
+"""Extrae las licencias de maternidad activas desde SQL Server (RRHHAmaral).
+
+Nota: los nombres de columna que vienen de .env se citan entre corchetes solo
+después de validar que sean un identificador simple. El nombre de la base del
+catálogo ERP se valida en settings antes de interpolarlo.
+"""
 
 from __future__ import annotations
 
@@ -13,16 +18,16 @@ from src.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-# Login timeout (seconds) for the initial connection attempt
+# Tiempo de espera del login (segundos) para el intento de conexión
 SQL_LOGIN_TIMEOUT = 30
-# Query timeout (seconds) for statement execution
+# Tiempo de espera de la consulta (segundos) para la ejecución
 SQL_QUERY_TIMEOUT = 60
 
 _SQL_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _bracket_ident(raw: str, label: str) -> str:
-    """Allow only simple identifiers; emit bracket-quoted name for SQL Server."""
+    """Solo identificadores simples; devuelve el nombre entre corchetes para SQL Server."""
     name = raw.strip()
     if not _SQL_IDENT.fullmatch(name):
         raise ValueError(
@@ -32,7 +37,7 @@ def _bracket_ident(raw: str, label: str) -> str:
 
 
 def _titular_display_name_sql_fragment(settings: Settings) -> str:
-    """Extra SELECT column recurso_display_name from ct_titulares alias t, or empty string."""
+    """Columna extra recurso_display_name desde ct_titulares (alias t), o cadena vacía."""
     nom = settings.sql_col_tit_nombre.strip()
     ape = settings.sql_col_tit_apellido.strip()
     if not nom and not ape:
@@ -57,15 +62,15 @@ def build_active_maternity_leaves_sql(
     settings: Settings, as_of_calendar: date | None = None
 ) -> str:
     """
-    Build SELECT using physical column names from settings (overridable via .env).
-    Result columns: recurso_id, centro_costo, fecha_inicio, fecha_fin;
-    optional erp_maternidad_pry when maternity_pry_use_cabidrecurso;
-    optional recurso_display_name when SQL_COL_TIT_NOMBRE / SQL_COL_TIT_APELLIDO are set.
+    Arma el SELECT con los nombres físicos de columna que vienen de settings (se pisan desde .env).
+    Columnas del resultado: recurso_id, centro_costo, fecha_inicio, fecha_fin;
+    erp_maternidad_pry si maternity_pry_use_cabidrecurso está activo;
+    recurso_display_name si están SQL_COL_TIT_NOMBRE / SQL_COL_TIT_APELLIDO.
 
-    Optional filter: only employed workers (parameterized estado value).
+    Filtro opcional: solo trabajadores en actividad (el estado va como parámetro).
 
-    When as_of_calendar is set (e.g. SYNC_TEST_DATE), rows are those with that
-    calendar day inside [fecha_inicio, fecha_fin] instead of GETDATE().
+    Si as_of_calendar está definido (p. ej. SYNC_TEST_DATE), entran las filas en las que
+    ese día cae dentro de [fecha_inicio, fecha_fin], en lugar de GETDATE().
     """
     col_fi = _bracket_ident(settings.sql_col_lic_fecha_inicio, "SQL_COL_LIC_FECHA_INICIO")
     col_ff = _bracket_ident(settings.sql_col_lic_fecha_fin, "SQL_COL_LIC_FECHA_FIN")
@@ -78,6 +83,8 @@ def build_active_maternity_leaves_sql(
     if settings.sql_require_trabajador_activo:
         col_est = _bracket_ident(settings.sql_col_trab_estado, "SQL_COL_TRAB_ESTADO")
         active_clause = f"\n  AND tr.{col_est} = ?"
+    # Proyecto cuyo nombre contiene "maternidad", por la fila de cabidrecursos del titular.
+    # TOP 1 + ORDER BY deja un solo código PRY cuando hay varias filas.
     erp_pry_sql = ""
     if settings.maternity_pry_use_cabidrecurso:
         db = settings.amaral_catalog_database
@@ -106,7 +113,7 @@ WHERE l.cod_tipo_licen = 'maternal'{window_clause}{active_clause};
 
 
 def build_holiday_exists_sql(settings: Settings) -> str:
-    """Single-row probe: ct_RHFeriados date column vs calendar day (parameter)."""
+    """Consulta de una fila: la columna de fecha de ct_RHFeriados contra un día (parámetro)."""
     col_f = _bracket_ident(settings.sql_col_feriado_fecha, "SQL_COL_FERIADO_FECHA")
     return f"""
 SELECT TOP 1 1 AS holiday_hit
@@ -116,7 +123,7 @@ WHERE CAST({col_f} AS date) = ?;
 
 
 def build_holiday_dates_in_range_sql(settings: Settings) -> str:
-    """All distinct calendar dates in ct_RHFeriados between range_start and range_end (inclusive)."""
+    """Fechas distintas de ct_RHFeriados entre range_start y range_end, inclusive."""
     col_f = _bracket_ident(settings.sql_col_feriado_fecha, "SQL_COL_FERIADO_FECHA")
     return f"""
 SELECT DISTINCT CAST({col_f} AS date) AS d
@@ -126,6 +133,7 @@ WHERE CAST({col_f} AS date) BETWEEN ? AND ?;
 
 
 def _build_connection_string(settings: Settings) -> str:
+    """Cadena ODBC de RRHH. Si SQL_ENCRYPT está vacío no se manda Encrypt (queda el valor por defecto del controlador)."""
     driver = settings.sql_driver.strip("{}")
     conn_str = (
         f"DRIVER={{{driver}}};"
@@ -146,13 +154,13 @@ def _build_connection_string(settings: Settings) -> str:
 
 def fetch_active_leaves(settings: Settings) -> list[dict[str, Any]]:
     """
-    Connect to SQL Server, run the maternity-leave query, return rows as dicts.
-    Column names match SQL aliases: recurso_id, centro_costo, fecha_inicio, fecha_fin,
-    and erp_maternidad_pry when MATERNITY_PRY_USE_CABIDRECURSO is on;
-    recurso_display_name when SQL_COL_TIT_NOMBRE / SQL_COL_TIT_APELLIDO are set.
+    Conecta a SQL Server, corre la consulta de licencias y devuelve las filas como dicts.
+    Los nombres coinciden con los alias SQL: recurso_id, centro_costo, fecha_inicio, fecha_fin,
+    y erp_maternidad_pry si MATERNITY_PRY_USE_CABIDRECURSO está activo;
+    recurso_display_name si están SQL_COL_TIT_NOMBRE / SQL_COL_TIT_APELLIDO.
 
-    If settings.sync_test_date is set, that date is used as the in-leave window
-    (same calendar semantics as FechaDocumento for scope=today), not GETDATE().
+    Si settings.sync_test_date está definido, esa fecha es la ventana de licencia activa
+    (la misma idea de calendario que FechaDocumento con alcance today), no GETDATE().
     """
     conn_str = _build_connection_string(settings)
     rows: list[dict[str, Any]] = []
@@ -208,7 +216,7 @@ def fetch_active_leaves(settings: Settings) -> list[dict[str, Any]]:
 def fetch_holiday_dates_in_range(
     settings: Settings, range_start: date, range_end: date
 ) -> set[date]:
-    """Dates in ct_RHFeriados within [range_start, range_end] inclusive."""
+    """Fechas de ct_RHFeriados dentro de [range_start, range_end], inclusive."""
     conn_str = _build_connection_string(settings)
     sql = build_holiday_dates_in_range_sql(settings)
     out: set[date] = set()
@@ -246,7 +254,7 @@ def fetch_holiday_dates_in_range(
 
 def fetch_date_is_public_holiday(settings: Settings, d: date) -> bool:
     """
-    True if d matches a row in ct_RHFeriados (same calendar date in sql_col_feriado_fecha).
+    Verdadero si d coincide con una fila de ct_RHFeriados (mismo día en sql_col_feriado_fecha).
     """
     conn_str = _build_connection_string(settings)
     sql = build_holiday_exists_sql(settings)

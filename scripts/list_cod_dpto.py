@@ -1,6 +1,7 @@
-"""Lista valores distintos de ct_RHTrabajador.cod_dpto (trim) para NODUM_MATERNITY_PROJECT_BY_DEPT.
+"""Lista los códigos de departamento distintos de ct_RHTrabajador.
 
-Ejecutar al incorporar departamentos nuevos o antes de ampliar el mapa en .env.
+Nota: solo lectura. Sirve para completar NODUM_MATERNITY_PROJECT_BY_DEPT.
+Correrlo cuando aparece un departamento nuevo, antes de cambiar el .env.
 """
 
 from __future__ import annotations

@@ -1,33 +1,35 @@
-# Production deployment checklist
+# Checklist de despliegue en producción
 
-Use this before scheduling the job on the production server.
+Usar esto antes de programar el job en el servidor de producción.
 
-## 1. Environment file (`.env`)
+Nota: esta página es para el servidor. Los cambios de código y las reglas de negocio están en [MANTENIMIENTO.md](MANTENIMIENTO.md).
 
-Copy `.env.example` to `.env` on the server. **Never commit `.env`.**
+## 1. Archivo de entorno (`.env`)
 
-| Setting | Production value |
-|---------|----------------|
-| `SYNC_PRODUCTION` | `1` (blocks dry-run / test date) |
+Copiar `.env.example` a `.env` en el servidor. **Nunca commitear `.env`.**
+
+| Variable | Valor en producción |
+|----------|---------------------|
+| `SYNC_PRODUCTION` | `1` (impide dry-run y fecha de prueba) |
 | `NODUM_DRY_RUN` | `0` |
-| `NODUM_PARTE_SCOPE` | `today` (daily job; auto catch-up of any missing leave days through run date) |
+| `NODUM_PARTE_SCOPE` | `today` (tarea diaria; la corrida siguiente completa los días de licencia que faltaron hasta la fecha de corrida) |
 | `NODUM_WSDL_URL` | `http://<host>:8080/soap/Amaral01/services/forms/v1.3/TpryParteDiaGS?wsdl` |
 | `NODUM_READ_WSDL_URL` | `http://<host>:8080/soap/Amaral01/services/sim/v1.3/RPryConsHorsxTit?wsdl` |
 | `NODUM_READ_OPERATION` | `simular` |
 | `NODUM_READ_MATCH_RESOLVED_PROYECTO` | `1` |
 | `AMARAL_CATALOG_DATABASE` | `amaral01` |
-| `SYNC_TEST_DATE` | **unset** |
-| `SYNC_FORCE_RUN` | **unset** (unless manual run on holiday) |
+| `SYNC_TEST_DATE` | **sin definir** |
+| `SYNC_FORCE_RUN` | **sin definir** (salvo una corrida manual en feriado) |
 
-Confirm SQL points at production RRHH (`SQL_SERVER_*`) and Nodum credentials have access to **Amaral01** forms + sim services.
+Confirmar que SQL apunta al RRHH de producción (`SQL_SERVER_*`) y que las credenciales de Nodum tienen acceso a los servicios forms y sim de **Amaral01**.
 
-## 2. Daily catch-up vs one-time backfill
+## 2. Puesta al día diaria y backfill
 
-1. **Production daily**: keep `NODUM_PARTE_SCOPE=today`. Each run scans working leave days from `fec_inicio` through today, asks Nodum what is already loaded, and submits only the missing hours. After a multi-day outage the next successful run fills the gaps.
-2. **`backfill`**: same date range as `today` (kept as an alias). Prefer `today` for the scheduled job.
-3. Keep `maternity_leave_sync_state.json` on the server (gitignored) and keep `NODUM_READ_OPERATION=simular` enabled so completeness is checked against Nodum, not only local state.
+1. **Tarea diaria de producción:** dejar `NODUM_PARTE_SCOPE=today`. Cada corrida recorre los días hábiles de la licencia desde `fec_inicio` hasta hoy, pregunta a Nodum qué ya está cargado y envía solo las horas que faltan. Después de varios días caído, la siguiente corrida que salga bien completa los huecos.
+2. **`backfill`:** mismo rango de fechas que `today` (queda como alias). Para la tarea programada conviene `today`.
+3. Dejar `maternity_leave_sync_state.json` en el servidor (está en `.gitignore`) y dejar `NODUM_READ_OPERATION=simular` activo, así lo que ya está completo se mira en Nodum y no solo en el archivo local.
 
-## 3. Pre-flight test on the server (Linux)
+## 3. Prueba previa en el servidor (Linux)
 
 ```bash
 cd /var/www/licencia-maternidad
@@ -35,39 +37,39 @@ python3 scripts/audit_maternity_sql.py
 python3 main.py
 ```
 
-- Exit code **0** = success or nothing to do (weekend/holiday/already synced).
-- Exit code **3** = Nodum rejected a load; check `maternity_leave_sync.log`.
-- Audit script lists who is in active maternal leave and resolved `G2.CentrodeCosto`.
+- Código de salida **0** = éxito o nada que hacer (fin de semana, feriado o ya sincronizado).
+- Código de salida **3** = Nodum rechazó una carga; revisar `maternity_leave_sync.log`.
+- El script de auditoría lista quién está en licencia maternal activa y el `G2.CentrodeCosto` resuelto.
 
-## 4. Cron (Linux scheduler)
+## 4. Cron (programador de Linux)
 
-1. Ensure launcher is executable: `chmod +x /var/www/licencia-maternidad/run_daily_sync.sh`.
-2. Edit crontab for the run account: `crontab -e`.
-3. Add weekday schedule (example 06:15):
+1. El lanzador tiene que poder ejecutarse: `chmod +x /var/www/licencia-maternidad/run_daily_sync.sh`.
+2. Editar el crontab de la cuenta que corre el job: `crontab -e`.
+3. Agregar el horario de días hábiles (ejemplo 06:15):
 
 ```cron
 15 6 * * 1-5 /var/www/licencia-maternidad/run_daily_sync.sh >> /var/www/licencia-maternidad/cron.log 2>&1
 ```
 
-4. Use a service account with network access to SQL + Nodum.
-5. Validate with `crontab -l` and monitor `cron.log` + `maternity_leave_sync.log`.
+4. Usar una cuenta de servicio con acceso de red a SQL y a Nodum.
+5. Validar con `crontab -l` y seguir `cron.log` y `maternity_leave_sync.log`.
 
-## 5. Monitoring
+## 5. Monitoreo
 
-- Log file: `maternity_leave_sync.log` (rotates at 10 MB, 5 backups).
-- Search for `CRITICAL`, `estado=0`, `Grabado Correctamente`, `Production check`.
-- State file: `maternity_leave_sync_state.json` (per recurso watermark).
+- Log: `maternity_leave_sync.log` (rota a los 10 MB, 5 copias).
+- Buscar `CRITICAL`, `estado=0`, `Grabado Correctamente`, `Production check`.
+- Archivo de estado: `maternity_leave_sync_state.json` (marca de agua por recurso).
 
-## 6. Security
+## 6. Seguridad
 
-- Restrict file ACL on `.env` to the run account only.
-- Do not copy test `maternity_leave_sync_state.json` from another environment into production unless intentional.
+- Limitar el acceso al archivo `.env` a la cuenta que corre el job.
+- No copiar un `maternity_leave_sync_state.json` de prueba a producción salvo que sea a propósito.
 
-## Exit codes (cron / scheduler)
+## Códigos de salida (cron / programador)
 
-| Code | Meaning |
-|------|---------|
-| 0 | OK / skipped (no work) |
-| 1 | Config / production checks failed |
-| 2 | SQL error |
-| 3 | Nodum load failure |
+| Código | Significado |
+|--------|-------------|
+| 0 | OK u omitido (sin trabajo) |
+| 1 | Falló la configuración o las validaciones de producción |
+| 2 | Error de SQL |
+| 3 | Falló la carga en Nodum |

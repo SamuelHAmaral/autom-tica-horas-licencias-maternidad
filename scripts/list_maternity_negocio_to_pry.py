@@ -1,4 +1,8 @@
-"""cod_negocio distinto -> proyecto maternidad (PRY) desde catálogo amaral01 (lista corta)."""
+"""Lista códigos de negocio del ERP y su proyecto de maternidad (PRY).
+
+Nota: solo lectura. Un proyecto entra si ct_proyectos.nom_dpto contiene "maternidad".
+Lista corta para revisar NODUM_MATERNITY_PROJECT_BY_DEPT. No carga partes.
+"""
 
 from __future__ import annotations
 

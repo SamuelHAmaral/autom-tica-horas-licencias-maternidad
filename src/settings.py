@@ -1,4 +1,8 @@
-"""Load application settings from environment (never hardcode secrets)."""
+"""Carga la configuración desde el entorno. Los secretos quedan en .env.
+
+Nota: un valor en blanco no siempre es el valor por defecto. opt() usa el valor por defecto si
+falta o está vacío. from_env_str() conserva el blanco cuando la clave está definida.
+"""
 
 from __future__ import annotations
 
@@ -13,19 +17,19 @@ _CATALOG_DB_SAFE = re.compile(r"^[A-Za-z0-9_]+$")
 
 @dataclass(frozen=True)
 class Settings:
-    # Connection + optional physical column names for HR tables (see .env.example).
+    # Conexión y nombres físicos opcionales de columnas de RRHH (ver .env.example).
     sql_driver: str
     sql_server: str
     sql_database: str
     sql_uid: str
     sql_pwd: str
-    # ODBC TLS negotiation knobs (empty Encrypt = driver default behavior).
+    # Ajuste TLS de ODBC (Encrypt vacío = comportamiento del controlador).
     sql_encrypt: str
     sql_trust_server_certificate: bool
     sql_col_lic_fecha_inicio: str
     sql_col_lic_fecha_fin: str
     sql_col_trab_centro_costo: str
-    # Optional ct_titulares columns (identifiers) for logs / dry-run: recurso_display_name in extract.
+    # Columnas opcionales de ct_titulares para el log y la prueba en seco: recurso_display_name en el extract.
     sql_col_tit_nombre: str
     sql_col_tit_apellido: str
     sql_col_trab_estado: str
@@ -49,27 +53,27 @@ class Settings:
     nodum_read_centro_costo_key: str
     nodum_read_filter_codigo_actividad: str
     nodum_read_filter_centro_costo: str
-    # If true, only sum read lines whose centro/actividad text matches resolved G2 proyecto (or fallback substring).
+    # Si es verdadero, solo suma líneas cuyo texto de centro o actividad coincide con el proyecto G2 resuelto (o el texto de respaldo).
     nodum_read_match_resolved_proyecto: bool
-    # Case-insensitive: line matches if this appears in centro or actividad text (e.g. maternidad). Empty = no fallback.
+    # Sin distinguir mayúsculas: coincide si este texto aparece en centro o actividad (p. ej. maternidad). Vacío = sin respaldo.
     nodum_read_line_substring_fallback: str
-    # Payload shaping for TpryParteDiaGS (align keys with WSDL if zeep rejects a field).
+    # Forma del parte TpryParteDiaGS (alinear las claves con el WSDL si zeep rechaza un campo).
     nodum_fecha_documento_strftime: str
     nodum_codigo_empresa: str
     nodum_g1_observaciones: str
     nodum_g2_codigo_actividad: str
     nodum_g2_horas: float
-    # today | week | backfill — see NODUM_PARTE_SCOPE in .env.example.
+    # today | week | backfill — ver NODUM_PARTE_SCOPE en .env.example.
     nodum_parte_scope: str
     nodum_dry_run: bool
     nodum_soap_connect_timeout: int
     nodum_soap_read_timeout: int
-    # If Nodum returns estado!=0 but mensaje contains any of these (case-insensitive), log INFO only (no failure).
-    # Env unset → default Spanish phrases. Env set but empty → strict (no substring exceptions).
+    # Si Nodum devuelve estado != 0 pero el mensaje contiene alguno de estos (sin distinguir mayúsculas), solo se registra INFO (no es fallo).
+    # Variable ausente → frases en español por defecto. Variable presente pero vacía → estricto (sin excepciones por texto).
     nodum_duplicate_ok_substrings: tuple[str, ...]
-    # G2.CentrodeCosto en WSDL = código proyecto (p. ej. PRY00380). Fallback when no dept map match.
+    # G2.CentrodeCosto en el WSDL = código de proyecto (p. ej. PRY00380). Respaldo si el departamento no está en el mapa.
     nodum_g2_centrode_costo: str
-    # SQL dept code (trimmed, case-insensitive) -> Nodum proyecto for G2.CentrodeCosto. From NODUM_MATERNITY_PROJECT_BY_DEPT.
+    # Código de departamento SQL (recortado, sin distinguir mayúsculas) → proyecto Nodum de G2.CentrodeCosto. Sale de NODUM_MATERNITY_PROJECT_BY_DEPT.
     nodum_maternity_project_by_dept: dict[str, str]
     # G2.observaciones_1 opcional; vacío → omitir clave en el dict.
     nodum_g2_observaciones_1: str
@@ -79,15 +83,20 @@ class Settings:
     sync_force_run: bool
     # Solo pruebas: si está definido, reemplaza date.today() en calendario, semana ISO y NODUM_PARTE_SCOPE=today.
     sync_test_date: date | None
-    # ERP catalog DB on same SQL Server (amaral01): recurso -> ct_cabidrecursos -> proyecto maternidad PRY.
+    # Base del catálogo ERP en el mismo SQL Server (amaral01): recurso → ct_cabidrecursos → proyecto maternidad PRY.
     amaral_catalog_database: str
     maternity_pry_use_cabidrecurso: bool
-    # backfill: JSON watermarks (per recurso + fec_inicio) to avoid resending every day each run.
+    # backfill: marcas de agua JSON (por recurso + fec_inicio) para no reenviar todos los días en cada corrida.
     nodum_backfill_state_disabled: bool
     nodum_backfill_state_file: str
 
 
 def load_settings() -> Settings:
+    """Arma Settings desde el entorno del proceso. ValueError si un valor es inválido."""
+
+    # --- Lectores de variables ---
+    # opt: si falta o está en blanco, usa el valor por defecto.
+    # from_env_str: si la clave está y el valor es blanco, queda en blanco (lo dejaron así a propósito).
     def req(name: str) -> str:
         v = os.environ.get(name, "").strip()
         if not v:
@@ -144,12 +153,16 @@ def load_settings() -> Settings:
             return default
         return int(raw)
 
+    # --- Qué días puede enviar una corrida ---
+    # Si no está definido, queda week. El .env de producción pone today (puesta al día hasta la fecha de corrida).
     parte_scope = opt("NODUM_PARTE_SCOPE", "week").strip().lower()
     if parte_scope not in ("today", "week", "backfill"):
         raise ValueError(
             f"Invalid NODUM_PARTE_SCOPE={parte_scope!r}; use 'today', 'week', or 'backfill'."
         )
 
+    # --- Archivo de estado local ---
+    # Solo un nombre de archivo, resuelto junto a main.py. Una ruta permitiría que un ambiente pise a otro.
     nodum_backfill_state_disabled = env_truthy("NODUM_BACKFILL_STATE_DISABLE")
     _state_file_raw = opt(
         "NODUM_BACKFILL_STATE_FILE", "maternity_leave_sync_state.json"
@@ -161,6 +174,8 @@ def load_settings() -> Settings:
         )
     nodum_backfill_state_file = _sf.name
 
+    # --- Mensajes de duplicado que no son fallo ---
+    # Clave ausente: frases en español por defecto. Clave presente pero vacía: sin excepciones.
     dup_key = "NODUM_DUPLICATE_OK_SUBSTRINGS"
     dup_default_csv = "ya existe,duplicado,registro duplicado,parte ya existe"
     if dup_key not in os.environ:
@@ -176,6 +191,8 @@ def load_settings() -> Settings:
             if x.strip()
         )
 
+    # --- Código de departamento de RRHH hacia el proyecto de Nodum ---
+    # Se guarda en minúsculas. "A001=PRY00375, CDE=PRY00376". Los tramos sin "=" se ignoran.
     dept_map_key = "NODUM_MATERNITY_PROJECT_BY_DEPT"
     nodum_maternity_project_by_dept: dict[str, str] = {}
     if dept_map_key in os.environ:
@@ -190,6 +207,8 @@ def load_settings() -> Settings:
                 if dept_code and proyecto:
                     nodum_maternity_project_by_dept[dept_code.casefold()] = proyecto
 
+    # --- "Hoy" ficticio para una prueba ---
+    # Solo fecha ISO. Las validaciones de producción lo rechazan si SYNC_PRODUCTION=1.
     test_date_key = "SYNC_TEST_DATE"
     sync_test_date: date | None = None
     if test_date_key in os.environ:
@@ -202,6 +221,8 @@ def load_settings() -> Settings:
                     f"Invalid {test_date_key}={raw_td!r}; use ISO YYYY-MM-DD"
                 ) from e
 
+    # --- Catálogo ERP para resolver el proyecto de maternidad ---
+    # El nombre se interpola en el SQL, así que solo admite letras, dígitos y guión bajo.
     maternity_pry_use_cabidrecurso = opt_bool("MATERNITY_PRY_USE_CABIDRECURSO", True)
     amaral_catalog_database = opt("AMARAL_CATALOG_DATABASE", "amaral01").strip()
     if maternity_pry_use_cabidrecurso:

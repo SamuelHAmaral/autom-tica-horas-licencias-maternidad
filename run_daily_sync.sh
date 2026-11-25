@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
+# Título: sincronización diaria de licencias de maternidad para el cron de Linux.
+# Nota: el cron tiene que ejecutar este archivo, no main.py. Entra a esta carpeta
+# para encontrar el .env y después usa .venv. El código de salida es el de la tarea
+# (0 correcto, 1 configuración, 2 SQL, 3 Nodum).
 set -euo pipefail
 
-# Daily maternity leave sync for Linux cron.
-# Keeps execution rooted at project folder so .env is discovered correctly.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 

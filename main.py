@@ -1,5 +1,8 @@
 """
-Entry point: extract active maternity leaves, transform for Nodum, call procesarAlta.
+Punto de entrada: extrae licencias de maternidad activas, las transforma para Nodum y llama a procesarAlta.
+
+Puesta en marcha: README.md y docs/PRODUCTION.md.
+Dónde cambiar el comportamiento: docs/MANTENIMIENTO.md.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from zeep.exceptions import Error as ZeepError
 from src import backfill_state
 from src.calendar_gate import should_run_sync
 from src.extractor import fetch_active_leaves, fetch_holiday_dates_in_range
+from src.hours_gap import classify_working_day_hours
 from src.loader import fetch_existing_hours_by_date, nodum_read_is_configured, procesar_alta
 from src.logging_config import LOG_FILENAME, setup_logging
 from src.production_checks import log_production_checks, run_production_checks
@@ -38,10 +42,12 @@ logger = logging.getLogger(__name__)
 
 
 def _row_keys_lower(row: dict[str, Any]) -> dict[str, Any]:
+    """Copia una fila SQL con claves en minúscula. pyodbc no mantiene estables las mayúsculas del alias."""
     return {str(k).lower(): v for k, v in row.items()}
 
 
 def _row_get_ci(row: Mapping[str, Any], *names: str) -> Any:
+    """Primer valor presente entre los nombres, sin distinguir mayúsculas en la clave."""
     low = _row_keys_lower(dict(row))
     for n in names:
         v = low.get(n.lower())
@@ -54,7 +60,7 @@ def _row_get_ci(row: Mapping[str, Any], *names: str) -> Any:
 
 
 def _nombre_suffix(row: Mapping[str, Any]) -> str:
-    """Append to log lines when SQL exposes recurso_display_name."""
+    """Sufijo de las líneas de log cuando SQL trae recurso_display_name."""
     name = _row_get_ci(row, "recurso_display_name")
     if name is None or not str(name).strip():
         return ""
@@ -62,7 +68,7 @@ def _nombre_suffix(row: Mapping[str, Any]) -> str:
 
 
 def _dry_run_context_from_row(row: Mapping[str, Any]) -> dict[str, Any]:
-    """Extra fields for dry-run log (nombre, HR dpto, ERP PRY)."""
+    """Campos extra del log de prueba en seco (nombre, departamento de RRHH, PRY del ERP)."""
     ctx: dict[str, Any] = {}
     name = _row_get_ci(row, "recurso_display_name")
     if name is not None and str(name).strip():
@@ -77,12 +83,21 @@ def _dry_run_context_from_row(row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _nodum_mensaje_is_duplicate_ok(mensaje: str | None, settings: Settings) -> bool:
+    """Verdadero si Nodum rechazó el parte con una frase conocida de "ya existe".
+
+    Esas frases no son un fallo: el día se trata como ya cargado.
+    Una lista vacía en NODUM_DUPLICATE_OK_SUBSTRINGS apaga esta excepción.
+    """
     if not settings.nodum_duplicate_ok_substrings:
         return False
     m = (mensaje or "").lower()
     return any(s in m for s in settings.nodum_duplicate_ok_substrings)
 
+
 def main() -> int:
+    """Una corrida. Salida 0 correcta o sin trabajo, 1 configuración, 2 SQL, 3 Nodum."""
+    # --- Entorno ---
+    # El .env junto a este archivo pisa las variables que ya traiga el proceso.
     BASE_DIR = Path(__file__).resolve().parent
     env_path = BASE_DIR / ".env"
     if not env_path.is_file():
@@ -98,7 +113,7 @@ def main() -> int:
         )
         return 1
 
-    # utf-8-sig strips BOM; stream + override=True so .env wins over stale process env
+    # utf-8-sig saca el BOM; stream + override=True para que .env gane sobre el entorno viejo del proceso.
     text = env_path.read_text(encoding="utf-8-sig")
     loaded = load_dotenv(stream=StringIO(text), override=True)
     setup_logging()
@@ -109,12 +124,16 @@ def main() -> int:
             env_path,
         )
 
+    # --- Configuración ---
+    # ValueError es un .env mal armado (salida 1), no un fallo de SQL ni de Nodum.
     try:
         settings = load_settings()
     except ValueError as e:
         logger.error("Configuration error: %s", e)
         return 1
 
+    # --- Traba de producción ---
+    # SYNC_PRODUCTION=1 no arranca si hay prueba en seco o si SYNC_TEST_DATE está definido.
     strict_prod = os.environ.get("SYNC_PRODUCTION", "").strip().lower() in (
         "1",
         "true",
@@ -136,6 +155,8 @@ def main() -> int:
             "SYNC_FORCE_RUN is set; weekend and ct_RHFeriados checks are disabled."
         )
 
+    # --- Día de corrida y alcance ---
+    # SYNC_TEST_DATE reemplaza "hoy" para el calendario, la ventana SQL y la puesta al día.
     run_date = settings.sync_test_date or date.today()
     if settings.sync_test_date is not None:
         logger.warning(
@@ -200,11 +221,15 @@ def main() -> int:
             settings.sql_trab_estado_activo,
         )
 
+    # --- Corte de fin de semana y feriado ---
+    # Omitir la corrida es una salida 0 normal. Los feriados salen de ct_RHFeriados.
     run_ok, skip_reason = should_run_sync(settings, today=run_date)
     if not run_ok:
         logger.info("Skipping run: %s.", skip_reason)
         return 0
 
+    # --- Licencias activas ---
+    # La misma consulta que scripts/audit_maternity_sql.py. Un error de SQL sale con código 2.
     try:
         rows = fetch_active_leaves(settings)
     except pyodbc.Error:
@@ -219,6 +244,8 @@ def main() -> int:
         logger.info("No active maternity leaves to process.")
         return 0
 
+    # --- Feriados dentro de la ventana de la licencia ---
+    # Los fines de semana se descartan después. Este conjunto es solo ct_RHFeriados.
     cal_start, cal_end = holiday_range_for_sync(settings.nodum_parte_scope, rows, run_date)
     try:
         holiday_dates = fetch_holiday_dates_in_range(settings, cal_start, cal_end)
@@ -232,6 +259,8 @@ def main() -> int:
         )
         return 2
 
+    # --- Archivo de estado local ---
+    # Recuerda las horas ya enviadas. Con la lectura de Nodum encendida, la marca de agua no salta días.
     state_path: Path | None = None
     state_data: dict[str, Any] | None = None
     if not settings.nodum_backfill_state_disabled:
@@ -257,6 +286,8 @@ def main() -> int:
                 settings.nodum_g2_horas,
             )
 
+    # --- Cada recurso ---
+    # Una segunda fila SQL del mismo recurso_id se salta para no cargar dos veces en Nodum.
     processed_recursos: set[object] = set()
     skipped_duplicates = 0
     failures = 0
@@ -276,9 +307,10 @@ def main() -> int:
             continue
         processed_recursos.add(recurso)
 
+        # --- Días hábiles de esta licencia ---
+        # today/backfill: cada día de semana desde fec_inicio hasta la fecha de corrida.
+        # week: solo la semana ISO actual. Los días ya completos se sacan más abajo.
         if settings.nodum_parte_scope in ("today", "backfill"):
-            # Daily production catch-up: every working leave day through run_date.
-            # Days already at NODUM_G2_HORAS (Nodum read and/or local state) are skipped below.
             valid_dates = leave_working_dates_backfill_to_run_date(
                 row, holiday_dates, run_date=run_date
             )
@@ -289,9 +321,9 @@ def main() -> int:
         fi: date | None = None
         if settings.nodum_parte_scope in ("today", "backfill"):
             fi = parse_leave_fecha_inicio(row)
-            # Watermark only when Nodum read is off: with read enabled we must scan the full
-            # leave window so gaps after an outage are still detected (watermark alone can
-            # skip past a failed day once a later day succeeds).
+            # La marca de agua solo recorta cuando la lectura de Nodum está apagada. Con lectura
+            # hay que recorrer toda la ventana para ver huecos tras una caída: la marca sola
+            # puede saltear un día fallido si un día posterior salió bien.
             if (
                 state_path is not None
                 and state_data is not None
@@ -339,6 +371,8 @@ def main() -> int:
                 )
             continue
 
+        # --- Horas ya cargadas y lo que falta ---
+        # Si falla la lectura de Nodum se salta a esta persona y cuenta para la salida 3.
         dry_ctx = _dry_run_context_from_row(row) if settings.nodum_dry_run else None
         target_daily_hours = float(settings.nodum_g2_horas)
         g2_cc = resolve_g2_centrode_costo(row, settings)
@@ -366,36 +400,44 @@ def main() -> int:
                     exc_info=True,
                 )
                 continue
-        pending_dates: list[date] = []
-        pending_hours_by_date: dict[date, float] = {}
-        for dia in valid_dates:
-            already_local = (
+        local_hours_by_date = {
+            dia: (
                 backfill_state.get_recorded_hours(state_data, recurso, dia)
                 if state_data is not None
                 else 0.0
             )
-            already_nodum = nodum_loaded_by_date.get(dia, 0.0)
-            already = max(already_local, already_nodum)
-            missing = max(0.0, target_daily_hours - already)
-            if missing <= 1e-9:
+            for dia in valid_dates
+        }
+        classified = classify_working_day_hours(
+            valid_dates,
+            target_daily_hours=target_daily_hours,
+            local_hours_by_date=local_hours_by_date,
+            nodum_hours_by_date=nodum_loaded_by_date,
+        )
+        pending_dates: list[date] = []
+        pending_hours_by_date: dict[date, float] = {}
+        for item in classified:
+            if item.complete:
                 logger.info(
                     "Skipping recurso_id=%s FechaDocumento=%s: already complete "
                     "(%.2f/%.2f h; local=%.2f nodum=%.2f).%s",
                     recurso,
-                    dia.isoformat(),
-                    already,
+                    item.dia.isoformat(),
+                    item.already,
                     target_daily_hours,
-                    already_local,
-                    already_nodum,
+                    item.already_local,
+                    item.already_nodum,
                     nom,
                 )
                 continue
-            pending_dates.append(dia)
-            pending_hours_by_date[dia] = missing
+            pending_dates.append(item.dia)
+            pending_hours_by_date[item.dia] = item.missing
 
         if not pending_dates:
             continue
 
+        # --- Un parte por día pendiente ---
+        # estado 0, o un mensaje de duplicado conocido, actualiza el archivo de estado.
         daily_payloads = build_daily_payloads(
             row, settings, pending_dates, hours_by_date=pending_hours_by_date
         )
@@ -507,6 +549,8 @@ def main() -> int:
         if state_dirty and state_path is not None and state_data is not None:
             backfill_state.save(state_path, state_data)
 
+    # --- Resultado ---
+    # Lo ya enviado queda enviado. Cualquier fallo de Nodum en el bucle igual sale con código 3.
     if failures:
         logger.critical(
             "CRITICAL: Run finished with %d Nodum/load failure(s); exiting with code 3. "

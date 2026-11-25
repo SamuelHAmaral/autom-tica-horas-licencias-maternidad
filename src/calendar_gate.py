@@ -1,4 +1,7 @@
-"""Gate scheduled sync: weekdays only, excluding ct_RHFeriados."""
+"""Corte de la corrida programada: solo días de semana, sin los de ct_RHFeriados.
+
+Nota: omitir la corrida es salida 0 desde main. SYNC_FORCE_RUN salta este corte.
+"""
 
 from __future__ import annotations
 
@@ -9,14 +12,15 @@ from src.settings import Settings
 
 
 def is_weekend(d: date | None = None) -> bool:
+    """Sábado o domingo. En Python weekday() es 5 y 6."""
     d = d or date.today()
     return d.weekday() >= 5
 
 
 def should_run_sync(settings: Settings, today: date | None = None) -> tuple[bool, str | None]:
     """
-    (True, None) → proceed with extract/load.
-    (False, reason) → skip (normal exit); weekends and HR holidays unless SYNC_FORCE_RUN.
+    (True, None) → seguir con la extracción y la carga.
+    (False, motivo) → omitir (salida normal); fines de semana y feriados de RRHH, salvo SYNC_FORCE_RUN.
     """
     if settings.sync_force_run:
         return True, None

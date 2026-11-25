@@ -1,7 +1,7 @@
-"""Map SQL rows to Nodum procesarAlta payloads (TpryParteDiaGS): one SOAP call per date in dias_habiles.
+"""Arma los datos de procesarAlta (TpryParteDiaGS) a partir de las filas SQL.
 
-Which dates are passed in is controlled by NODUM_PARTE_SCOPE in main
-(today/backfill = catch-up through run date; week = current ISO week).
+Nota: un parte por día hábil. main.py elige las fechas con NODUM_PARTE_SCOPE
+(today/backfill = puesta al día hasta la fecha de corrida; week = semana ISO actual).
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def _to_date(val: Any) -> date:
+    """pyodbc devuelve datetime para columnas de fecha. Los textos se rechazan a propósito."""
     if val is None:
         raise ValueError("missing date value for leave bounds")
     if isinstance(val, datetime):
@@ -27,11 +28,12 @@ def _to_date(val: Any) -> date:
 
 
 def parse_leave_fecha_inicio(db_row: Mapping[str, Any]) -> date:
-    """``fecha_inicio`` from an extractor row as a calendar date."""
+    """``fecha_inicio`` de una fila del extractor, como fecha de calendario."""
     return _to_date(db_row["fecha_inicio"])
 
 
 def current_week_monday_sunday(today: date) -> tuple[date, date]:
+    """Lunes a domingo de la semana ISO que contiene today."""
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
     return monday, sunday
@@ -43,10 +45,10 @@ def holiday_range_for_sync(
     run_date: date,
 ) -> tuple[date, date]:
     """
-    Inclusive calendar bounds for loading ct_RHFeriados.
+    Límites inclusive para cargar ct_RHFeriados.
 
-    For ``today`` and ``backfill``, span from the earliest ``fecha_inicio`` among rows
-    through ``run_date`` so catch-up candidate leave days can be checked against holidays.
+    Con ``today`` y ``backfill``, va desde el ``fecha_inicio`` más temprano de las filas
+    hasta ``run_date``, para poder contrastar los días de la puesta al día con los feriados.
     """
     if parte_scope in ("today", "backfill"):
         if not rows:
@@ -64,10 +66,10 @@ def leave_working_dates_backfill_to_run_date(
     run_date: date | None = None,
 ) -> list[date]:
     """
-    Mon–Fri dates from ``fecha_inicio`` through ``min(fecha_fin, run_date)``, excluding holidays.
+    Días lunes a viernes desde ``fecha_inicio`` hasta ``min(fecha_fin, run_date)``, sin feriados.
 
-    Use when the leave row appears in HR after real-world start: every working day from true
-    start through the run date is included (not only the current ISO week).
+    Sirve cuando la fila aparece en RRHH después del inicio real: entran todos los días
+    hábiles desde el inicio verdadero hasta la fecha de corrida, no solo la semana ISO actual.
     """
     run_date = run_date or date.today()
     fi = _to_date(db_row["fecha_inicio"])
@@ -92,8 +94,8 @@ def leave_working_dates_in_current_week(
     today: date | None = None,
 ) -> list[date]:
     """
-    Mon–Fri dates in the ISO week of `today` that fall inside [fecha_inicio, fecha_fin]
-    and are not in holiday_dates (ct_RHFeriados for that week).
+    Días lunes a viernes de la semana ISO de `today` que caen dentro de [fecha_inicio, fecha_fin]
+    y no están en holiday_dates (ct_RHFeriados de esa semana).
     """
     today = today or date.today()
     mon, sun = current_week_monday_sunday(today)
@@ -114,7 +116,7 @@ def leave_working_dates_in_current_week(
 
 
 def _erp_maternidad_pry_stripped(db_row: Mapping[str, Any]) -> str | None:
-    """Scalar from extractor subquery (driver may vary alias casing)."""
+    """Escalar de la subconsulta del extractor (el controlador puede cambiar las mayúsculas del alias)."""
     for key in ("erp_maternidad_pry", "ERP_MATERNIDAD_PRY"):
         v = db_row.get(key)
         if v is None:
@@ -127,14 +129,15 @@ def _erp_maternidad_pry_stripped(db_row: Mapping[str, Any]) -> str | None:
 
 def resolve_g2_centrode_costo(db_row: Mapping[str, Any], settings: Settings) -> str:
     """
-    Nodum G2.CentrodeCosto = código proyecto.
+    Nodum G2.CentrodeCosto = código de proyecto.
 
-    Prefer ``erp_maternidad_pry`` from ERP (``ct_cabidrecursos`` → negocio → proyecto whose name
-    contains ``maternidad``), same rule as Nodum UI when MATERNITY_PRY_USE_CABIDRECURSO is on.
+    Primero ``erp_maternidad_pry`` del ERP (``ct_cabidrecursos`` → negocio → proyecto cuyo
+    nombre contiene ``maternidad``), la misma regla que la pantalla de Nodum cuando
+    MATERNITY_PRY_USE_CABIDRECURSO está activo.
 
-    Otherwise uses ``centro_costo`` (``SQL_COL_TRAB_CENTRO_COSTO``, e.g. cod_dpto) against
-    ``settings.nodum_maternity_project_by_dept`` (case-insensitive); then ``NODUM_G2_CENTRODECOSTO``;
-    else raw SQL value (legacy).
+    Si no, usa ``centro_costo`` (``SQL_COL_TRAB_CENTRO_COSTO``, p. ej. cod_dpto) contra
+    ``settings.nodum_maternity_project_by_dept`` (sin distinguir mayúsculas); después
+    ``NODUM_G2_CENTRODECOSTO``; si tampoco hay, el valor crudo de SQL (comportamiento viejo).
     """
     erp_pry = _erp_maternidad_pry_stripped(db_row)
     if erp_pry and settings.maternity_pry_use_cabidrecurso:
@@ -177,7 +180,7 @@ def build_daily_payloads(
     hours_by_date: Mapping[date, float] | None = None,
 ) -> list[dict[str, Any]]:
     """
-    One TpryParteDiaGS dict per calendar day: G1.FechaDocumento = that day, G2 Horasdeduracion = daily hours.
+    Un dict TpryParteDiaGS por día: G1.FechaDocumento = ese día, G2 Horasdeduracion = las horas del día.
     """
     recurso_id = db_row["recurso_id"]
     cc_soap = resolve_g2_centrode_costo(db_row, settings)

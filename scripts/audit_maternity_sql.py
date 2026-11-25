@@ -1,4 +1,8 @@
-"""Lista quienes devuelve RRHH en licencia maternal activa (misma consulta que el sync)."""
+"""Muestra a quién vería la sincronización en licencia maternal activa, y el proyecto de Nodum resuelto.
+
+Nota: solo lectura. Usa el mismo SQL que el job, incluido SYNC_TEST_DATE si está definido.
+No llama a procesarAlta y no actualiza el archivo de estado.
+"""
 
 from __future__ import annotations
 
@@ -45,7 +49,7 @@ def main() -> int:
             f"-> Nodum G2.CentrodeCosto={nodum_cc!r}"
         )
 
-    # Best-effort names from ct_titulares
+    # Nombres a ojo desde ct_titulares, si hace falta completar el listado.
     ids = list(seen.keys())
     if not ids:
         return 0

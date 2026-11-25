@@ -1,4 +1,8 @@
-"""Días hábiles con 2+ recurso_id y 2+ cod_dpto distintos en licencia maternal (histórico)."""
+"""Busca días hábiles en los que la licencia de maternidad junta a dos o más personas y departamentos.
+
+Nota: control histórico de solo lectura. No llama a Nodum. Sirve cuando un mapeo
+podría cargar el proyecto equivocado porque dos departamentos comparten un día.
+"""
 
 from __future__ import annotations
 

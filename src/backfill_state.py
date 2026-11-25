@@ -1,4 +1,8 @@
-"""Watermarks for backfill: skip weekdays already accepted or duplicate-OK in Nodum."""
+"""Estado JSON local: horas ya enviadas y una marca de agua por licencia.
+
+Nota: main aplica la marca de agua solo cuando la lectura de Nodum está apagada.
+El archivo vive junto a main.py y no hay que copiarlo entre ambientes.
+"""
 
 from __future__ import annotations
 
@@ -13,10 +17,12 @@ STATE_VERSION = 1
 
 
 def _recurso_key(recurso_id: object) -> str:
+    """Clave del archivo de estado. Recorta espacios para que '100' y '100 ' sean el mismo titular."""
     return str(recurso_id).strip()
 
 
 def load(path: Path) -> dict[str, Any]:
+    """Lee el estado JSON. Si el archivo falta o está corrupto, arranca vacío para que la corrida siga."""
     if not path.is_file():
         return {"version": STATE_VERSION, "by_recurso": {}}
     try:
@@ -34,6 +40,7 @@ def load(path: Path) -> dict[str, Any]:
 
 
 def save(path: Path, data: dict[str, Any]) -> None:
+    """Reemplaza el archivo vía un nombre temporal para que un corte a mitad no deje un JSON a medias."""
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, suffix=".tmp", text=True)
@@ -54,7 +61,7 @@ def get_last_ok_fecha(
     recurso_id: object,
     fec_inicio: date,
 ) -> date | None:
-    """Last calendar day we recorded as OK for this leave episode, or None if unknown / new episode."""
+    """Último día registrado como correcto para esta licencia, o None si no se conoce o es otra licencia."""
     key = _recurso_key(recurso_id)
     br = data.get("by_recurso") or {}
     if not isinstance(br, dict):
@@ -78,6 +85,7 @@ def get_last_ok_fecha(
 
 
 def dates_after_watermark(dates: list[date], last_ok: date | None) -> list[date]:
+    """Días estrictamente posteriores a last_ok. None significa que esta licencia todavía no tiene marca."""
     if last_ok is None:
         return list(dates)
     return [d for d in dates if d > last_ok]
@@ -89,6 +97,7 @@ def record_day_ok(
     fec_inicio: date,
     dia: date,
 ) -> None:
+    """Avanza last_ok_fecha. Otro fec_inicio es otra licencia y reemplaza el episodio anterior."""
     key = _recurso_key(recurso_id)
     br = data.setdefault("by_recurso", {})
     if not isinstance(br, dict):
@@ -110,7 +119,7 @@ def record_day_ok(
 def get_recorded_hours(
     data: Mapping[str, Any], recurso_id: object, dia: date
 ) -> float:
-    """Best-effort hours already recorded in local sync state for recurso/day."""
+    """Horas ya anotadas en el estado local para ese recurso y ese día. Si el dato no sirve, devuelve 0."""
     hrs_root = data.get("hours_by_recurso_date") or {}
     if not isinstance(hrs_root, dict):
         return 0.0
@@ -130,7 +139,7 @@ def get_recorded_hours(
 def record_hours(
     data: dict[str, Any], recurso_id: object, dia: date, add_hours: float
 ) -> None:
-    """Add successful loaded hours to local sync state for recurso/day."""
+    """Suma al estado local las horas que se cargaron bien para ese recurso y ese día."""
     if add_hours <= 0:
         return
     hrs_root = data.setdefault("hours_by_recurso_date", {})
@@ -156,7 +165,7 @@ def record_hours(
 def mark_day_full(
     data: dict[str, Any], recurso_id: object, dia: date, target_hours: float
 ) -> None:
-    """Set local sync state as complete for recurso/day."""
+    """Marca el estado local como completo para ese recurso y ese día."""
     hrs_root = data.setdefault("hours_by_recurso_date", {})
     if not isinstance(hrs_root, dict):
         data["hours_by_recurso_date"] = {}

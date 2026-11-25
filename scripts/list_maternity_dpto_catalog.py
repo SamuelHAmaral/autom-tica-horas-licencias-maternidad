@@ -1,11 +1,8 @@
-"""Consulta catálogo ERP: recurso / negocio / dpto ligado a proyectos con nom_dpto tipo %maternidad%.
+"""Catálogo detallado del ERP: recurso, negocio y departamento ligados a un proyecto de maternidad.
 
-Mismo SQL Server que .env (SQL_SERVER_*). Base catálogo por defecto amaral01; sobrescribir con:
-
-    AMARAL_CATALOG_DATABASE=amaral01
-
-Joins: ct_cabidrecursos -> ct_dptos -> ct_proyectos.
-Sirve para alinear ct_RHTrabajador.cod_dpto con nombres de proyecto maternidad / negocio en Nodum.
+Nota: solo lectura, y puede imprimir muchas filas. Usa el mismo SQL Server que el .env.
+La base del catálogo es amaral01 por defecto; se pisa con AMARAL_CATALOG_DATABASE.
+Joins: ct_cabidrecursos -> ct_dptos -> ct_proyectos (nom_dpto like %maternidad%).
 """
 
 from __future__ import annotations

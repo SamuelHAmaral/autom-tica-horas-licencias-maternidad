@@ -1,7 +1,11 @@
-# Secrets and local config (use .env.example as template)
+# Título: archivos que se quedan en la máquina.
+# Nota: .env y el archivo de estado tienen secretos y las horas "ya enviadas".
+# No commitearlos. La plantilla del .env es .env.example.
+
+# Secretos y configuración local (la plantilla es .env.example)
 .env
 
-# Runtime / machine-local
+# Tiempo de ejecución / propio de esta máquina
 maternity_leave_sync.log
 maternity_leave_sync.log.*
 maternity_leave_sync_state.json
@@ -18,7 +22,7 @@ build/
 venv/
 .env.local
 
-# IDE
+# Editor
 .idea/
 .vscode/
 *.swp

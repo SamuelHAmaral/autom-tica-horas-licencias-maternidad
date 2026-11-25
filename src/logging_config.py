@@ -1,4 +1,8 @@
-"""Central logging setup: console + rotating file (maternity_leave_sync.log)."""
+"""Log de consola y archivo rotativo de la tarea.
+
+Nota: los colores son solo de consola. maternity_leave_sync.log queda en texto plano.
+setup_logging no hace nada si el logger raíz ya tiene handlers.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +16,7 @@ LOG_FILENAME = "maternity_leave_sync.log"
 MAX_BYTES = 10 * 1024 * 1024  # 10 MiB
 BACKUP_COUNT = 5
 
-# ANSI (console only; never written to log file). Respects NO_COLOR and TTY.
+# ANSI (solo consola; nunca se escribe en el archivo de log). Respeta NO_COLOR y la TTY.
 _RESET = "\033[0m"
 _BOLD = "\033[1m"
 _DIM = "\033[2m"
@@ -24,6 +28,7 @@ _CYAN = "\033[36m"
 
 
 def _console_use_color(stream: object) -> bool:
+    """Color solo en una TTY, y solo si NO_COLOR y LOG_COLOR lo permiten."""
     if os.environ.get("NO_COLOR", "").strip():
         return False
     v = os.environ.get("LOG_COLOR", "1").strip().lower()
@@ -36,7 +41,7 @@ def _console_use_color(stream: object) -> bool:
 
 
 class _ConsoleColorFormatter(logging.Formatter):
-    """TTY-only colors for demos; file handler uses plain Formatter."""
+    """Colores solo en TTY, para mirar la corrida; el archivo usa un Formatter plano."""
 
     def __init__(self, *args: object, use_color: bool = False, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
@@ -78,9 +83,9 @@ def setup_logging(
     log_file_name: str = LOG_FILENAME,
 ) -> None:
     """
-    Configure root logger: INFO to console (optional ANSI colors on TTY),
-    plain text to rotating file at project root.
-    Idempotent if already configured (avoids duplicate handlers on reload).
+    Configura el logger raíz: INFO a consola (colores ANSI opcionales en TTY)
+    y texto plano al archivo rotativo en la raíz del proyecto.
+    Si ya está configurado no agrega handlers, para no duplicarlos al recargar.
     """
     root = logging.getLogger()
     if root.handlers:

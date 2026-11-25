@@ -1,4 +1,9 @@
-"""Pre-flight checks before running against production Nodum / RRHH."""
+"""Controles previos antes de correr contra Nodum y RRHH de producción.
+
+Nota: el modo estricto (SYNC_PRODUCTION=1) convierte la prueba en seco y
+SYNC_TEST_DATE en errores. El resto de ajustes riesgosos quedan como avisos
+para que el job igual pueda arrancar.
+"""
 
 from __future__ import annotations
 
@@ -23,10 +28,10 @@ class ProductionCheckResult:
 
 def run_production_checks(settings: Settings, *, strict: bool) -> ProductionCheckResult:
     """
-    Validate settings for a production run.
+    Valida la configuración de una corrida de producción.
 
-    strict=True (SYNC_PRODUCTION=1): treat blocking issues as errors (exit 1).
-    strict=False: log warnings only for non-fatal misconfigurations.
+    strict=True (SYNC_PRODUCTION=1): lo que bloquea pasa a error (salida 1).
+    strict=False: solo avisa de configuraciones que no son fatales.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -84,6 +89,7 @@ def run_production_checks(settings: Settings, *, strict: bool) -> ProductionChec
 
 
 def log_production_checks(result: ProductionCheckResult) -> None:
+    """Escribe avisos y errores que bloquean. No corta el proceso; lo decide main."""
     for w in result.warnings:
         logger.warning("Production check: %s", w)
     for e in result.errors:

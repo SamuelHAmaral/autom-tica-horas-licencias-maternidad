@@ -2,6 +2,8 @@
 
 Job en Python que lee las **licencias de maternidad activas** en SQL Server (`RRHHAmaral`) y envía las **horas por día hábil** a **Nodum** por SOAP (`procesarAlta` / `TpryParteDiaGS`).
 
+Nota: operación del servidor en esta página y en [docs/PRODUCTION.md](docs/PRODUCTION.md). Para cambiar el código, [docs/MANTENIMIENTO.md](docs/MANTENIMIENTO.md).
+
 ## Requisitos
 
 - Python 3.10+
@@ -19,7 +21,7 @@ pip install -r requirements.txt
 
    | Valor | Comportamiento |
    |--------|----------------|
-   | **`today`** | Todos los días hábiles de la licencia desde **`fec_inicio`** hasta el día de corrida. Omite los que ya están completos en Nodum (lectura) y/o en el state local. **Recomendado** con tarea diaria: si el cron falla varios días, la siguiente corrida recupera los faltantes. |
+   | **`today`** | Todos los días hábiles de la licencia desde **`fec_inicio`** hasta el día de corrida. Omite los que ya están completos en Nodum (lectura) y/o en el archivo de estado local. **Recomendado** con tarea diaria: si el cron falla varios días, la siguiente corrida recupera los faltantes. |
    | **`week`** | Todos los días hábiles de la **semana ISO actual** que caen dentro de `[fec_inicio, fec_final]`. |
    | **`backfill`** | Mismo rango que **`today`** (alias de puesta al día). |
 
@@ -39,7 +41,7 @@ Resumen:
 |----------|------------|
 | `SYNC_PRODUCTION` | `1` |
 | `NODUM_DRY_RUN` | `0` |
-| `NODUM_PARTE_SCOPE` | `today` (tarea diaria; auto catch-up de días faltantes hasta la fecha de corrida) |
+| `NODUM_PARTE_SCOPE` | `today` (tarea diaria; la corrida siguiente completa los días que faltaron) |
 | `NODUM_WSDL_URL` / `NODUM_READ_WSDL_URL` | Ruta `/soap/Amaral01/...` |
 | `SYNC_TEST_DATE` | no definir |
 
@@ -107,17 +109,30 @@ Solo **`estado == 0`** cuenta como éxito estricto; **`NODUM_DUPLICATE_OK_SUBSTR
 
 Opcional: **`AMARAL_CATALOG_DATABASE`** si la base ERP no es `amaral01`.
 
+## Para quien mantiene el código
+
+Guía de recorrido, reglas y “dónde cambiar cada cosa”: **[docs/MANTENIMIENTO.md](docs/MANTENIMIENTO.md)**.
+
+Los tests no abren SQL ni Nodum. Correrlos con el virtualenv del proyecto:
+
+```bash
+.venv/bin/python -m unittest discover -s tests -t .
+```
+
 ## Estructura del proyecto
 
 - `main.py` — punto de entrada  
 - `src/extractor.py` — SQL Server (`pyodbc`)  
-- `src/transformer.py` — fechas hábiles, payloads, resolución G2  
+- `src/transformer.py` — fechas hábiles, datos del parte, resolución G2  
+- `src/hours_gap.py` — horas que todavía faltan en cada día hábil  
 - `src/loader.py` — SOAP (`zeep`)  
 - `src/settings.py` — variables de entorno  
 - `src/calendar_gate.py` — fin de semana / feriados  
 - `src/backfill_state.py` — JSON de marca de agua para `backfill`  
 - `src/logging_config.py` — consola + log rotativo  
 - `src/production_checks.py` — validaciones pre-producción (`SYNC_PRODUCTION`)  
+- `tests/` — reglas de negocio sin red  
 - `run_daily_sync.sh` — entrada para `cron` en Linux  
-- `run_daily_sync.bat` — alternativa para Task Scheduler en Windows  
-- `docs/PRODUCTION.md` — checklist de despliegue  
+- `run_daily_sync.bat` — alternativa para el Programador de tareas de Windows  
+- `docs/PRODUCTION.md` — lista de despliegue  
+- `docs/MANTENIMIENTO.md` — guía para cambiar el código  

@@ -1,4 +1,8 @@
-"""Une RRHH ct_RHTrabajador.cod_dpto con amaral01 ct_dptos.cod_negocio (si las claves coinciden)."""
+"""Une los códigos de departamento de RRHH con el cod_negocio del ERP.
+
+Nota: solo lectura. Las claves coinciden solo si ct_RHTrabajador.cod_dpto es igual a ct_dptos.cod_dpto.
+La base del ERP es AMARAL_CATALOG_DATABASE (por defecto amaral01).
+"""
 
 from __future__ import annotations
 

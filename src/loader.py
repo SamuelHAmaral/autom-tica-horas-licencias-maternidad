@@ -1,4 +1,8 @@
-"""SOAP client for Nodum procesarAlta (zeep + HTTP Basic Auth)."""
+"""Cliente SOAP de Nodum: escritura con procesarAlta, lectura con NODUM_READ_OPERATION.
+
+Nota: la lectura suma solo las líneas del proyecto de maternidad. Las horas de
+otro proyecto no deben marcar el día de maternidad como ya completo.
+"""
 
 from __future__ import annotations
 
@@ -25,14 +29,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ProcesarAltaResult:
-    """SOAP procesarAlta outcome (dry run: both None)."""
+    """Resultado de procesarAlta (en prueba en seco los dos quedan en None)."""
 
     estado: int | None
     mensaje: str | None
 
 
 def _unwrap_nodum_resultado_block(response: Any) -> Any | None:
-    """Resolve list-of-one / Resultado wrapper to the object that carries estado/mensaje."""
+    """Baja la lista de un elemento, o el contenedor Resultado, hasta el objeto que trae estado y mensaje."""
     if response is None:
         return None
     if isinstance(response, list):
@@ -48,6 +52,7 @@ def _unwrap_nodum_resultado_block(response: Any) -> Any | None:
 
 
 def _soap_timeout_tuple(settings: Settings) -> tuple[int, int]:
+    """Segundos (conexión, lectura). zeep le pasa este par a requests."""
     return (
         settings.nodum_soap_connect_timeout,
         settings.nodum_soap_read_timeout,
@@ -55,6 +60,7 @@ def _soap_timeout_tuple(settings: Settings) -> tuple[int, int]:
 
 
 def _build_client(settings: Settings) -> Client:
+    """Cliente zeep de procesarAlta. La autenticación básica y los tiempos de espera salen de settings."""
     session = Session()
     session.auth = HTTPBasicAuth(settings.nodum_username, settings.nodum_password)
     transport = Transport(session=session, timeout=_soap_timeout_tuple(settings))
@@ -62,6 +68,7 @@ def _build_client(settings: Settings) -> Client:
 
 
 def _build_read_client(settings: Settings) -> Client:
+    """Cliente zeep del WSDL de lectura. Si el usuario de lectura está vacío, usa las credenciales de escritura."""
     wsdl = settings.nodum_read_wsdl.strip() or settings.nodum_wsdl
     read_user = settings.nodum_read_username.strip() or settings.nodum_username
     read_pwd = settings.nodum_read_password.strip() or settings.nodum_password
@@ -72,10 +79,12 @@ def _build_read_client(settings: Settings) -> Client:
 
 
 def nodum_read_is_configured(settings: Settings) -> bool:
+    """Verdadero si NODUM_READ_OPERATION está definido. Vacío significa no llamar al servicio de lectura."""
     return bool(settings.nodum_read_operation.strip())
 
 
 def _dict_get_ci(d: Mapping[str, Any], key: str) -> Any:
+    """Búsqueda sin distinguir mayúsculas en la clave. Las mayúsculas de las claves de Nodum no son estables."""
     if not key:
         return None
     if key in d:
@@ -88,6 +97,7 @@ def _dict_get_ci(d: Mapping[str, Any], key: str) -> Any:
 
 
 def _to_iso_date(val: Any) -> date | None:
+    """Fecha de calendario desde un valor de zeep o un texto ISO. Lo que no se parsea se salta."""
     if val is None:
         return None
     if isinstance(val, datetime):
@@ -111,6 +121,7 @@ def _to_iso_date(val: Any) -> date | None:
 
 
 def _walk_dicts(node: Any) -> list[Mapping[str, Any]]:
+    """Cada dict dentro de una respuesta anidada de zeep. Las líneas de detalle pueden estar varios niveles abajo."""
     out: list[Mapping[str, Any]] = []
     if isinstance(node, Mapping):
         out.append(node)
@@ -129,9 +140,9 @@ def _read_line_matches_maternity_proyecto(
     g2_centrode_costo: str,
 ) -> bool:
     """
-    When match mode is on, only count detail lines for the same proyecto we load (PRY…)
-    or lines whose centro/actividad text contains the fallback substring (e.g. maternidad).
-    Avoids treating 8h on other proyectos as 'maternity complete'.
+    Con el filtro activo, solo cuenta líneas del mismo proyecto que se va a cargar (PRY…)
+    o líneas cuyo texto de centro/actividad contiene el texto de respaldo (p. ej. maternidad).
+    Evita tomar 8 h de otros proyectos como "maternidad ya completa".
     """
     if not settings.nodum_read_match_resolved_proyecto:
         return True
@@ -158,11 +169,12 @@ def fetch_existing_hours_by_date(
     g2_centrode_costo: str = "",
 ) -> dict[date, float]:
     """
-    Query Nodum read operation and aggregate already loaded hours per date for one recurso.
-    Empty dict when read integration is not configured.
+    Consulta la operación de lectura de Nodum y suma las horas ya cargadas por fecha, para un recurso.
+    Dict vacío si la lectura no está configurada.
     """
     if not nodum_read_is_configured(settings):
         return {}
+    # Algunas operaciones sim de Nodum reciben parámetros planos. Otras piden un bloque anidado.
     client = _build_read_client(settings)
     op = settings.nodum_read_operation.strip()
     fecha_fmt = settings.nodum_fecha_documento_strftime
@@ -205,6 +217,7 @@ def fetch_existing_hours_by_date(
         )
 
     totals: dict[date, float] = {}
+    # Quedarse con este titular, esta ventana de fechas y solo las líneas de maternidad.
     for item in dicts:
         rec = _dict_get_ci(item, settings.nodum_read_recurso_key)
         fec = _dict_get_ci(item, settings.nodum_read_fecha_key)
@@ -240,9 +253,9 @@ def fetch_existing_hours_by_date(
 
 def extract_estado_from_resultado(response: Any) -> int | None:
     """
-    Walk zeep response for Resultado.estado (or Resultado['estado']).
-    Nodum may return a one-element list of dicts instead of a Resultado wrapper.
-    Returns None if not found or not convertible to int.
+    Busca Resultado.estado (o Resultado['estado']) en la respuesta de zeep.
+    Nodum a veces devuelve una lista de un dict en lugar de un wrapper Resultado.
+    Devuelve None si no está o si no se puede convertir a int.
     """
     resultado = _unwrap_nodum_resultado_block(response)
     if resultado is None:
@@ -264,8 +277,8 @@ def _log_dry_run_form_preview(
     dry_run_context: Mapping[str, Any] | None = None,
 ) -> None:
     """
-    Log human-readable fields that mirror what operators enter in Nodum (TpryParteDiaGS).
-    Same handlers as the rest of the job (console: optional color; file: UTF-8 plain text).
+    Registra los campos legibles, los mismos que el operador carga en Nodum (TpryParteDiaGS).
+    Usa los mismos handlers que el resto del job (consola: color opcional; archivo: texto plano UTF-8).
     """
     try:
         gen = tpry_parte_dia_gs.get("General")
@@ -333,6 +346,7 @@ def _log_dry_run_form_preview(
 
 
 def extract_mensaje_from_resultado(response: Any) -> str | None:
+    """Resultado.mensaje como texto, o None si Nodum no lo mandó."""
     resultado = _unwrap_nodum_resultado_block(response)
     if resultado is None:
         return None
@@ -352,9 +366,9 @@ def procesar_alta(
     dry_run_context: Mapping[str, Any] | None = None,
 ) -> ProcesarAltaResult:
     """
-    Invoke procesarAlta with TpryParteDiaGS payload.
-    NODUM_DRY_RUN=1: log form-style preview + print payload (no network);
-    returns ProcesarAltaResult(None, None).
+    Llama a procesarAlta con el parte TpryParteDiaGS.
+    NODUM_DRY_RUN=1: registra la vista de formulario e imprime el dict (sin red);
+    devuelve ProcesarAltaResult(None, None).
     """
     if settings.nodum_dry_run:
         _log_dry_run_form_preview(tpry_parte_dia_gs, dry_run_context=dry_run_context)
